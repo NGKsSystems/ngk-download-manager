@@ -68,10 +68,6 @@ android.enable_androidx = True
 # (list) Android application meta-data to set (key=value format)
 android.meta_data = com.google.android.gms.version=@integer/google_play_services_version
 
-# (list) Android library project to add (will be added in the
-# automatically imported in the Gradle project)
-android.gradle_repositories = google(), mavenCentral()
-
 # (list) Gradle dependencies to add
 android.gradle_dependencies = 
 
