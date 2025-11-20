@@ -1,0 +1,491 @@
+"""
+NGK's Download Manager
+A comprehensive download manager with support for:
+- YouTube and multi-site video downloads (yt-dlp)
+- Hugging Face model/dataset downloads
+- Direct HTTP/HTTPS downloads
+- Resume capability and progress tracking
+"""
+
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+import threading
+import os
+import sys
+import json
+from urllib.parse import urlparse
+import webbrowser
+from datetime import datetime
+
+# Import our custom modules
+from download_manager import DownloadManager
+from youtube_downloader import YouTubeDownloader
+from huggingface_downloader import HuggingFaceDownloader
+from utils import URLDetector, ConfigManager, HistoryManager
+from dialogs import QualitySelectionDialog, HuggingFaceInfoDialog, ThumbnailViewer, ProgressDialog
+
+class DownloadManagerGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("NGK's Download Manager v1.0")
+        self.root.geometry("800x600")
+        self.root.minsize(600, 400)
+        
+        # Initialize managers
+        self.config_manager = ConfigManager()
+        self.download_manager = DownloadManager()
+        self.youtube_downloader = YouTubeDownloader()
+        self.hf_downloader = HuggingFaceDownloader()
+        self.url_detector = URLDetector()
+        
+        # Download tracking
+        self.active_downloads = {}
+        self.download_counter = 0
+        
+        self.setup_ui()
+        self.load_config()
+        
+    def setup_ui(self):
+        """Setup the main user interface"""
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Download tab
+        self.download_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.download_frame, text="Downloads")
+        self.setup_download_tab()
+        
+        # Settings tab
+        self.settings_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.settings_frame, text="Settings")
+        self.setup_settings_tab()
+        
+        # History tab
+        self.history_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.history_frame, text="History")
+        self.setup_history_tab()
+        
+    def setup_download_tab(self):
+        """Setup the main download interface"""
+        # URL input section
+        url_frame = ttk.LabelFrame(self.download_frame, text="Download URL", padding=10)
+        url_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.url_var = tk.StringVar()
+        self.url_entry = ttk.Entry(url_frame, textvariable=self.url_var, font=("Arial", 11))
+        self.url_entry.pack(fill=tk.X, pady=(0, 10))
+        self.url_entry.bind('<Return>', self.on_url_enter)
+        
+        # URL analysis display
+        self.url_info_var = tk.StringVar()
+        self.url_info_label = ttk.Label(url_frame, textvariable=self.url_info_var, foreground="blue")
+        self.url_info_label.pack(anchor=tk.W)
+        
+        # Bind URL change event
+        self.url_var.trace('w', self.on_url_change)
+        
+        # Download options frame
+        options_frame = ttk.LabelFrame(self.download_frame, text="Download Options", padding=10)
+        options_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Destination folder
+        dest_frame = ttk.Frame(options_frame)
+        dest_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(dest_frame, text="Destination:").pack(side=tk.LEFT)
+        self.dest_var = tk.StringVar(value=os.path.expanduser("~/Downloads"))
+        self.dest_entry = ttk.Entry(dest_frame, textvariable=self.dest_var, state="readonly")
+        self.dest_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 10))
+        ttk.Button(dest_frame, text="Browse", command=self.browse_destination).pack(side=tk.RIGHT)
+        
+        # Download button
+        button_frame = ttk.Frame(options_frame)
+        button_frame.pack(fill=tk.X)
+        
+        self.download_btn = ttk.Button(button_frame, text="Download", command=self.start_download, style="Accent.TButton")
+        self.download_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.paste_btn = ttk.Button(button_frame, text="Paste URL", command=self.paste_url)
+        self.paste_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.clear_btn = ttk.Button(button_frame, text="Clear", command=self.clear_url)
+        self.clear_btn.pack(side=tk.LEFT)
+        
+        # Progress section
+        progress_frame = ttk.LabelFrame(self.download_frame, text="Download Progress", padding=10)
+        progress_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Downloads list
+        columns = ("ID", "Filename", "URL Type", "Progress", "Speed", "Status")
+        self.downloads_tree = ttk.Treeview(progress_frame, columns=columns, show="tree headings", height=8)
+        
+        # Configure columns
+        self.downloads_tree.heading("#0", text="")
+        self.downloads_tree.column("#0", width=0, stretch=False)
+        
+        for col in columns:
+            self.downloads_tree.heading(col, text=col)
+            if col == "Filename":
+                self.downloads_tree.column(col, width=200)
+            elif col == "Progress":
+                self.downloads_tree.column(col, width=100)
+            else:
+                self.downloads_tree.column(col, width=80)
+        
+        # Scrollbar for treeview
+        scrollbar = ttk.Scrollbar(progress_frame, orient=tk.VERTICAL, command=self.downloads_tree.yview)
+        self.downloads_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.downloads_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Context menu for downloads
+        self.setup_context_menu()
+        
+    def setup_settings_tab(self):
+        """Setup the settings interface"""
+        # Hugging Face settings
+        hf_frame = ttk.LabelFrame(self.settings_frame, text="Hugging Face Settings", padding=10)
+        hf_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(hf_frame, text="HF Token:").pack(anchor=tk.W)
+        self.hf_token_var = tk.StringVar()
+        token_frame = ttk.Frame(hf_frame)
+        token_frame.pack(fill=tk.X, pady=(5, 10))
+        
+        self.hf_token_entry = ttk.Entry(token_frame, textvariable=self.hf_token_var, show="*")
+        self.hf_token_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        ttk.Button(token_frame, text="Test Token", command=self.test_hf_token).pack(side=tk.RIGHT)
+        
+        # YouTube settings
+        yt_frame = ttk.LabelFrame(self.settings_frame, text="YouTube Settings", padding=10)
+        yt_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.auto_quality = tk.BooleanVar(value=True)
+        ttk.Checkbutton(yt_frame, text="Auto-select best quality", variable=self.auto_quality).pack(anchor=tk.W)
+        
+        self.extract_audio = tk.BooleanVar(value=False)
+        ttk.Checkbutton(yt_frame, text="Extract audio only", variable=self.extract_audio).pack(anchor=tk.W)
+        
+        # General settings
+        general_frame = ttk.LabelFrame(self.settings_frame, text="General Settings", padding=10)
+        general_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(general_frame, text="Max concurrent downloads:").pack(anchor=tk.W)
+        self.max_downloads_var = tk.IntVar(value=3)
+        ttk.Spinbox(general_frame, from_=1, to=10, textvariable=self.max_downloads_var, width=10).pack(anchor=tk.W, pady=(5, 10))
+        
+        # Save settings button
+        ttk.Button(self.settings_frame, text="Save Settings", command=self.save_config).pack(pady=20)
+        
+    def setup_history_tab(self):
+        """Setup the download history interface"""
+        # History list
+        history_columns = ("Date", "Filename", "URL", "Status", "Size")
+        self.history_tree = ttk.Treeview(self.history_frame, columns=history_columns, show="headings")
+        
+        for col in history_columns:
+            self.history_tree.heading(col, text=col)
+            if col == "Filename":
+                self.history_tree.column(col, width=200)
+            elif col == "URL":
+                self.history_tree.column(col, width=300)
+            else:
+                self.history_tree.column(col, width=100)
+        
+        # Scrollbar for history
+        history_scrollbar = ttk.Scrollbar(self.history_frame, orient=tk.VERTICAL, command=self.history_tree.yview)
+        self.history_tree.configure(yscrollcommand=history_scrollbar.set)
+        
+        self.history_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        history_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        
+        # History buttons
+        history_btn_frame = ttk.Frame(self.history_frame)
+        history_btn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        ttk.Button(history_btn_frame, text="Clear History", command=self.clear_history).pack(side=tk.LEFT)
+        ttk.Button(history_btn_frame, text="Export History", command=self.export_history).pack(side=tk.LEFT, padx=(10, 0))
+        
+    def setup_context_menu(self):
+        """Setup context menu for downloads"""
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Pause", command=self.pause_download)
+        self.context_menu.add_command(label="Resume", command=self.resume_download)
+        self.context_menu.add_command(label="Cancel", command=self.cancel_download)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Open File", command=self.open_file)
+        self.context_menu.add_command(label="Open Folder", command=self.open_folder)
+        
+        self.downloads_tree.bind("<Button-3>", self.show_context_menu)
+        
+    def on_url_change(self, *args):
+        """Handle URL input change"""
+        url = self.url_var.get().strip()
+        if url:
+            url_type = self.url_detector.detect_url_type(url)
+            self.url_info_var.set(f"Detected: {url_type}")
+        else:
+            self.url_info_var.set("")
+    
+    def on_url_enter(self, event):
+        """Handle Enter key in URL entry"""
+        self.start_download()
+    
+    def paste_url(self):
+        """Paste URL from clipboard"""
+        try:
+            clipboard = self.root.clipboard_get()
+            if clipboard:
+                self.url_var.set(clipboard.strip())
+        except tk.TclError:
+            pass
+    
+    def clear_url(self):
+        """Clear URL input"""
+        self.url_var.set("")
+        self.url_info_var.set("")
+    
+    def browse_destination(self):
+        """Browse for destination folder"""
+        folder = filedialog.askdirectory(initialdir=self.dest_var.get())
+        if folder:
+            self.dest_var.set(folder)
+    
+    def start_download(self):
+        """Start a new download"""
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showwarning("Warning", "Please enter a URL to download")
+            return
+        
+        destination = self.dest_var.get()
+        if not os.path.exists(destination):
+            os.makedirs(destination, exist_ok=True)
+        
+        # Detect URL type and start appropriate downloader
+        url_type = self.url_detector.detect_url_type(url)
+        
+        # Create download entry
+        download_id = self.download_counter
+        self.download_counter += 1
+        
+        item_id = self.downloads_tree.insert("", tk.END, values=(
+            download_id, "Preparing...", url_type, "0%", "0 B/s", "Starting"
+        ))
+        
+        self.active_downloads[download_id] = {
+            'item_id': item_id,
+            'url': url,
+            'type': url_type,
+            'destination': destination,
+            'status': 'starting'
+        }
+        
+        # Start download in separate thread
+        thread = threading.Thread(
+            target=self.download_worker,
+            args=(download_id, url, url_type, destination),
+            daemon=True
+        )
+        thread.start()
+        
+        # Clear URL after starting download
+        self.clear_url()
+    
+    def download_worker(self, download_id, url, url_type, destination):
+        """Worker thread for downloads"""
+        try:
+            def progress_callback(progress_info):
+                self.root.after(0, self.update_progress, download_id, progress_info)
+            
+            if url_type in ["YouTube", "Twitter", "Instagram", "TikTok"]:
+                success = self.youtube_downloader.download(
+                    url, destination, progress_callback,
+                    extract_audio=self.extract_audio.get(),
+                    auto_quality=self.auto_quality.get()
+                )
+            elif url_type == "Hugging Face":
+                success = self.hf_downloader.download(
+                    url, destination, progress_callback,
+                    token=self.hf_token_var.get()
+                )
+            else:  # Direct download
+                success = self.download_manager.download(
+                    url, destination, progress_callback
+                )
+            
+            if success:
+                self.root.after(0, self.download_completed, download_id)
+            else:
+                self.root.after(0, self.download_failed, download_id)
+                
+        except Exception as e:
+            self.root.after(0, self.download_error, download_id, str(e))
+    
+    def update_progress(self, download_id, progress_info):
+        """Update progress in UI"""
+        if download_id not in self.active_downloads:
+            return
+        
+        download = self.active_downloads[download_id]
+        item_id = download['item_id']
+        
+        # Update treeview
+        current_values = list(self.downloads_tree.item(item_id)['values'])
+        if len(current_values) >= 6:
+            current_values[1] = progress_info.get('filename', current_values[1])
+            current_values[3] = progress_info.get('progress', current_values[3])
+            current_values[4] = progress_info.get('speed', current_values[4])
+            current_values[5] = progress_info.get('status', current_values[5])
+            
+            self.downloads_tree.item(item_id, values=current_values)
+    
+    def download_completed(self, download_id):
+        """Handle download completion"""
+        if download_id not in self.active_downloads:
+            return
+        
+        download = self.active_downloads[download_id]
+        item_id = download['item_id']
+        
+        # Update status
+        current_values = list(self.downloads_tree.item(item_id)['values'])
+        current_values[3] = "100%"
+        current_values[5] = "Completed"
+        self.downloads_tree.item(item_id, values=current_values)
+        
+        # Add to history
+        self.add_to_history(download)
+        
+        # Clean up
+        download['status'] = 'completed'
+    
+    def download_failed(self, download_id):
+        """Handle download failure"""
+        if download_id not in self.active_downloads:
+            return
+        
+        download = self.active_downloads[download_id]
+        item_id = download['item_id']
+        
+        # Update status
+        current_values = list(self.downloads_tree.item(item_id)['values'])
+        current_values[5] = "Failed"
+        self.downloads_tree.item(item_id, values=current_values)
+        
+        download['status'] = 'failed'
+    
+    def download_error(self, download_id, error_msg):
+        """Handle download error"""
+        self.download_failed(download_id)
+        messagebox.showerror("Download Error", f"Download failed: {error_msg}")
+    
+    def show_context_menu(self, event):
+        """Show context menu for downloads"""
+        item = self.downloads_tree.selection()[0] if self.downloads_tree.selection() else None
+        if item:
+            self.context_menu.post(event.x_root, event.y_root)
+    
+    def pause_download(self):
+        """Pause selected download"""
+        # TODO: Implement pause functionality
+        messagebox.showinfo("Info", "Pause functionality coming soon!")
+    
+    def resume_download(self):
+        """Resume selected download"""
+        # TODO: Implement resume functionality
+        messagebox.showinfo("Info", "Resume functionality coming soon!")
+    
+    def cancel_download(self):
+        """Cancel selected download"""
+        # TODO: Implement cancel functionality
+        messagebox.showinfo("Info", "Cancel functionality coming soon!")
+    
+    def open_file(self):
+        """Open downloaded file"""
+        # TODO: Implement open file functionality
+        messagebox.showinfo("Info", "Open file functionality coming soon!")
+    
+    def open_folder(self):
+        """Open download folder"""
+        selection = self.downloads_tree.selection()
+        if selection:
+            download_id = int(self.downloads_tree.item(selection[0])['values'][0])
+            if download_id in self.active_downloads:
+                folder = self.active_downloads[download_id]['destination']
+                os.startfile(folder)
+    
+    def test_hf_token(self):
+        """Test Hugging Face token validity"""
+        token = self.hf_token_var.get().strip()
+        if not token:
+            messagebox.showwarning("Warning", "Please enter a Hugging Face token")
+            return
+        
+        if self.hf_downloader.validate_token(token):
+            messagebox.showinfo("Success", "Hugging Face token is valid!")
+        else:
+            messagebox.showerror("Error", "Invalid Hugging Face token")
+    
+    def save_config(self):
+        """Save configuration settings"""
+        config = {
+            'hf_token': self.hf_token_var.get(),
+            'auto_quality': self.auto_quality.get(),
+            'extract_audio': self.extract_audio.get(),
+            'max_downloads': self.max_downloads_var.get(),
+            'destination': self.dest_var.get()
+        }
+        self.config_manager.save_config(config)
+        messagebox.showinfo("Success", "Settings saved successfully!")
+    
+    def load_config(self):
+        """Load configuration settings"""
+        config = self.config_manager.load_config()
+        if config:
+            self.hf_token_var.set(config.get('hf_token', ''))
+            self.auto_quality.set(config.get('auto_quality', True))
+            self.extract_audio.set(config.get('extract_audio', False))
+            self.max_downloads_var.set(config.get('max_downloads', 3))
+            self.dest_var.set(config.get('destination', os.path.expanduser("~/Downloads")))
+    
+    def add_to_history(self, download):
+        """Add download to history"""
+        # TODO: Implement history functionality
+        pass
+    
+    def clear_history(self):
+        """Clear download history"""
+        # TODO: Implement clear history
+        messagebox.showinfo("Info", "Clear history functionality coming soon!")
+    
+    def export_history(self):
+        """Export download history"""
+        # TODO: Implement export history
+        messagebox.showinfo("Info", "Export history functionality coming soon!")
+
+def main():
+    """Main application entry point"""
+    root = tk.Tk()
+    app = DownloadManagerGUI(root)
+    
+    # Set application icon (if available)
+    try:
+        root.iconbitmap("icon.ico")
+    except:
+        pass
+    
+    # Center window on screen
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()

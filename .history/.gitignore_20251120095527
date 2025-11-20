@@ -1,0 +1,52 @@
+# .gitignore for NGK's Download Manager
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Buildozer
+.buildozer/
+bin/
+*.apk
+*.aab
+
+# Download manager data
+downloads_database.json
+download_history.json
+*.part
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local config
+config.local.json
