@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
@@ -37,13 +37,13 @@ jobs:
           echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
 
       - name: Cache Buildozer global directory
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.buildozer
           key: buildozer-${{ hashFiles('buildozer.spec') }}
 
       - name: Cache Buildozer local directory
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .buildozer
           key: buildozer-local-${{ hashFiles('buildozer.spec') }}
@@ -54,7 +54,7 @@ jobs:
           buildozer -v android debug
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: NGKs-Download-Manager-APK
           path: bin/*.apk
