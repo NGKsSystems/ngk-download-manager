@@ -34,7 +34,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install --upgrade "sh>=2,<3"
           pip install --upgrade Cython==0.29.33
           pip install --upgrade buildozer
           pip install --upgrade setuptools wheel
@@ -51,6 +50,9 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
+          export AUTOCONF_VERSION=2.71
+          export AUTOMAKE_VERSION=1.16
+          yes | buildozer android debug || true
           buildozer -v android debug
 
       - name: Upload APK artifact

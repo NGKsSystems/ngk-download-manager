@@ -34,10 +34,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install --upgrade "sh>=2,<3"
           pip install --upgrade Cython==0.29.33
           pip install --upgrade buildozer
           pip install --upgrade setuptools wheel
+          # Install latest python-for-android with autotools fixes
+          pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
       - name: Set JAVA_HOME
         run: |
@@ -49,8 +50,35 @@ jobs:
           rm -rf .buildozer
           rm -rf ~/.buildozer
 
+      - name: Create autotools patch script
+        run: |
+          cat > fix_autotools.sh << 'EOF'
+          #!/bin/bash
+          # Find and fix all configure.ac files with autotools issues
+          find ~/.buildozer -name "configure.ac" -type f 2>/dev/null | while read conf; do
+            if grep -q "AC_TRY_LINK\|LT_SYS_SYMBOL_USCORE" "$conf" 2>/dev/null; then
+              echo "Patching $conf"
+              sed -i 's/AC_TRY_LINK/AC_LINK_IFELSE/g' "$conf"
+              # Add pattern allow for libtool macros
+              if ! grep -q "m4_pattern_allow" "$conf"; then
+                sed -i '1i m4_pattern_allow([LT_SYS_SYMBOL_USCORE])' "$conf"
+              fi
+            fi
+          done
+          EOF
+          chmod +x fix_autotools.sh
+
       - name: Build APK with Buildozer
         run: |
+          export AUTOCONF_VERSION=2.71
+          export AUTOMAKE_VERSION=1.16
+          export M4=/usr/bin/m4
+          export ACLOCAL_PATH=/usr/share/aclocal
+          # First attempt - will fail but create configure.ac files
+          yes | buildozer android debug || true
+          # Fix any generated configure.ac files
+          ./fix_autotools.sh
+          # Second attempt with fixed files
           buildozer -v android debug
 
       - name: Upload APK artifact

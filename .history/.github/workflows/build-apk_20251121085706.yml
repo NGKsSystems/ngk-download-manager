@@ -34,7 +34,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install --upgrade "sh>=2,<3"
           pip install --upgrade Cython==0.29.33
           pip install --upgrade buildozer
           pip install --upgrade setuptools wheel
@@ -49,8 +48,23 @@ jobs:
           rm -rf .buildozer
           rm -rf ~/.buildozer
 
+      - name: Cache Buildozer global directory
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+
+      - name: Cache Buildozer local directory
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-local-${{ hashFiles('buildozer.spec') }}
+
       - name: Build APK with Buildozer
         run: |
+          export AUTOCONF_VERSION=2.71
+          export AUTOMAKE_VERSION=1.16
+          yes | buildozer android debug || true
           buildozer -v android debug
 
       - name: Upload APK artifact
