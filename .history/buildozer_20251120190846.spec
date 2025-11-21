@@ -23,8 +23,8 @@ version = 1.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-# Mobile app is now a remote controller - no yt-dlp needed
-requirements = python3,kivy,requests
+# Note: yt-dlp and mutagen removed - not compatible with Android build
+requirements = python3,kivy,requests,pillow
 
 # (str) Presplash of the application
 #presplash.filename = %(source.dir)s/data/presplash.png
@@ -45,7 +45,7 @@ android.api = 30
 android.minapi = 21
 
 # (str) Android NDK version to use
-android.ndk = 25c
+android.ndk = 23b
 
 # (int) Android SDK version to use
 android.sdk = 30

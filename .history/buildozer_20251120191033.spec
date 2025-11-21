@@ -23,8 +23,7 @@ version = 1.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-# Mobile app is now a remote controller - no yt-dlp needed
-requirements = python3,kivy,requests
+requirements = python3,kivy,requests,yt-dlp,pillow,certifi,urllib3,charset-normalizer,idna,mutagen,websockets,brotli,pycryptodomex
 
 # (str) Presplash of the application
 #presplash.filename = %(source.dir)s/data/presplash.png
