@@ -144,7 +144,13 @@ class DownloadScreen(Screen):
         """Load all downloads from database on startup"""
         all_downloads = self.downloads_db.get_all_downloads()
         
-        for download_id, download_info in all_downloads.items():
+        # Handle both list and dict formats
+        if isinstance(all_downloads, list):
+            downloads_dict = {d.get('id', str(i)): d for i, d in enumerate(all_downloads)}
+        else:
+            downloads_dict = all_downloads
+        
+        for download_id, download_info in downloads_dict.items():
             # Create progress widget
             progress_widget = self.create_progress_widget(
                 download_id,
